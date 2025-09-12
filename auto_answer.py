@@ -8,8 +8,9 @@ from selenium.webdriver.edge.webdriver import WebDriver
 
 def answer(wd : WebDriver) -> WebDriver:
     choose = wd
-    choose.switch_to.frame('iframe')
-    choose.find_element(By.TAG_NAME, "iframe")
+    wd.switch_to.frame(wd.find_element(By.TAG_NAME, "iframe"))
+    wd.switch_to.frame(wd.find_element(By.TAG_NAME, "iframe"))
+    wd.switch_to.frame(wd.find_element(By.TAG_NAME, "iframe"))
 
     with open("data/questions.json", "r", encoding="utf-8") as f:
         questions = json.load(f)

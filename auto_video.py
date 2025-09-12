@@ -20,6 +20,10 @@ def video(wd : WebDriver) -> WebDriver:
     watch.implicitly_wait(1750)
     watch.find_element(By.CLASS_NAME, "vjs-ended")
 
+    #点击“下一节”按钮，跳转到习题部分
+    watch.switch_to.default_content()
+    watch.find_element(By.ID, "prevNextFocusNext").click()
+
     #重置等待时间
     watch.implicitly_wait(10)
     return watch
