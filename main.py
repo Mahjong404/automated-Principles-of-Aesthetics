@@ -47,6 +47,7 @@ wd = auto_video.video(wd)
 wd.switch_to.default_content()
 wd.find_element(By.ID, "prevNextFocusNext").click()
 
+#自动做题
 wd = auto_answer.answer(wd)
 
 input("按回车退出")
