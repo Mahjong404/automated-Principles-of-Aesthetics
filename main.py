@@ -12,7 +12,7 @@ options = webdriver.EdgeOptions()
 options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
 #调用驱动启动浏览器
-wd = webdriver.Edge(options=options, service=Service(r".\msedgedriver.exe"))
+wd = webdriver.Edge(options=options)
 
 #自动登录
 wd = auto_sign_in.sign_in(wd)

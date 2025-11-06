@@ -13,6 +13,27 @@ def sign_in(wd : WebDriver) -> WebDriver:
     with open("data/account.json", "r", encoding="utf-8") as f:
         account = json.load(f)
 
+    sign.get("about:blank")
+    sign.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+        // 拦截 addEventListener
+        const nativeAdd = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, fn, opts) {
+            if (type === 'mouseout') {
+                console.log('[block] mouseout on', this);
+                return;   // 直接丢弃
+            }
+            nativeAdd.call(this, type, fn, opts);
+        };
+
+        // 拦截 onmouseout 属性
+        Object.defineProperty(Element.prototype, 'onmouseout', {
+            set: function(_) { /* 什么都不做 */ },
+            get: function() { return null; }
+        });
+    """
+    })
+
     #访问网址（尽量填写未完成的小节的视频页的网址）
     course = str(account["course"])
     sign.get(course)
