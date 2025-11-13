@@ -7,6 +7,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.edge.webdriver import WebDriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # 引入字体解码模块（方式B：纯Python本地调用）
 sys.path.append(r"chaoxing_solution_of_font_confusion")
@@ -58,55 +59,113 @@ def answer(wd: WebDriver) -> WebDriver:
         font_bytes = base64.b64decode(ttf_b64)
         decoder = _build_decoder(translate(font_bytes))
 
-    # 等待题目与选项渲染
-    wait = WebDriverWait(wd, 10)
-    ti_mu = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".TiMu .font-cxsecret")))
-    option_els = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "ul.Zy_ulTop li.before-after-checkbox")))
-
-    # 解码题干
-    question_raw = ti_mu.text
-    question_decoded = decoder(question_raw)
-
     # 读取题库
     with open(r"data/questions.json", "r", encoding="utf-8") as f:
         question_bank = json.load(f)
 
-    # 匹配题干
-    q_key = _normalize_question(question_decoded)
-    matched = None
-    for q in question_bank:
-        if _normalize_question(q.get("question", "")) == q_key:
-            matched = q
-            break
+    # 等待所有题目块并逐题处理
+    wait = WebDriverWait(wd, 10)
+    question_blocks = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".TiMu")))
 
-    if not matched:
-        raise RuntimeError(f"题干未在题库匹配：{q_key}")
-
-    # 解析题库中的正确选项文本（按选项文本点击）
-    # options 形如：["A、物色","B、景色",...]; answer 形如 "AB"
-    letter_to_text = {}
-    for opt in matched.get("options", []):
-        m = re.match(r"\s*([A-D])、\s*(.+)\s*", opt)
-        if m:
-            letter_to_text[m.group(1)] = m.group(2)
-
-    target_letters = list(matched.get("answer", ""))
-    target_texts = set(letter_to_text.get(l, "") for l in target_letters)
-    target_texts = {t for t in target_texts if t}
-
-    if not target_texts:
-        raise RuntimeError(f"未解析到正确选项文本：{matched}")
-
-    # 遍历页面选项，按解码后的选项文本匹配并点击
-    for li in option_els:
+    for qb in question_blocks:
+        # 题干容器
         try:
-            a_text_raw = li.find_element(By.CSS_SELECTOR, "a.fl.after").text
+            title_el = qb.find_element(By.CSS_SELECTOR, ".Zy_TItle .font-cxsecret")
         except Exception:
-            a_text_raw = li.text  # 兜底：取整个 li 的文本
-        a_text_decoded = decoder(a_text_raw).strip()
+            els = qb.find_elements(By.CSS_SELECTOR, ".font-cxsecret")
+            title_el = els[0] if els else None
 
-        if a_text_decoded in target_texts:
-            # 使用 JS 点击，规避有时 Selenium 原生点击不触发的问题
-            wd.execute_script("arguments[0].click();", li)
+        if not title_el:
+            continue
+
+        # 解码题干并匹配题库
+        question_raw = title_el.text
+        question_decoded = decoder(question_raw)
+        q_key = _normalize_question(question_decoded)
+
+        matched = None
+        for q in question_bank:
+            if _normalize_question(q.get("question", "")) == q_key:
+                matched = q
+                break
+
+        if not matched:
+            # 未匹配则跳过该题
+            continue
+
+        # 从题库解析正确选项文本
+        letter_to_text = {}
+        if matched.get("type") == "判断题":
+            # 单独处理判断题
+            ans = matched.get("answer", "")
+            if ans == "√":
+                target_texts = {"对"}
+            elif ans == "X":
+                target_texts = {"错"}
+            else:
+                target_texts = set()
+        else:
+            # 单选题和多选题
+            for opt in matched.get("options", []):
+                m = re.match(r"\s*([A-D])、\s*(.+)\s*", opt)
+                if m:
+                    letter_to_text[m.group(1)] = m.group(2)
+
+            target_letters = list(matched.get("answer", ""))
+            target_texts = set(letter_to_text.get(l, "") for l in target_letters)
+
+        target_texts = {t for t in target_texts if t}
+        if not target_texts:
+            continue
+
+        # 遍历当前题块选项并点击匹配文本
+        option_els = qb.find_elements(By.CSS_SELECTOR, "ul.Zy_ulTop li")
+        for li in option_els:
+            try:
+                a_text_raw = li.find_element(By.CSS_SELECTOR, "a.fl.after").text
+            except Exception:
+                a_text_raw = li.text
+            a_text_decoded = decoder(a_text_raw).strip()
+
+            if a_text_decoded in target_texts:
+                # 避免重复点击导致反选，检测 aria-checked
+                checked = (li.get_attribute("aria-checked") == "true")
+                if not checked:
+                    wd.execute_script("arguments[0].click();", li)
+
+    # 完成答题后点击提交按钮
+    try:
+        submit_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//*[self::a or self::button][contains(normalize-space(.), '提交')]")))
+        wd.execute_script("arguments[0].click();", submit_btn)
+    except TimeoutException:
+        # 若不可点击，尝试滚动后重试
+        try:
+            wd.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            submit_btn = WebDriverWait(wd, 5).until(EC.element_to_be_clickable((By.XPATH, "//*[self::a or self::button][contains(normalize-space(.), '提交')]")))
+            wd.execute_script("arguments[0].click();", submit_btn)
+        except Exception:
+            pass  # 提交失败，也将切换到 default_content 并返回
+
+    # 切换回主文档处理弹窗
+    wd.switch_to.default_content()
+
+    # 处理提交后的确认弹窗
+    try:
+        pop_wait = WebDriverWait(wd, 5)
+        pop_content_element = pop_wait.until(EC.visibility_of_element_located((By.ID, "popcontent")))
+        pop_content = pop_content_element.text
+
+        if "确认提交？" in pop_content:
+            confirm_button = pop_wait.until(EC.element_to_be_clickable((By.ID, "popok")))
+            wd.execute_script("arguments[0].click();", confirm_button)
+        elif "您还有未做完的" in pop_content:
+            cancel_button = pop_wait.until(EC.element_to_be_clickable((By.ID, "popno")))
+            wd.execute_script("arguments[0].click();", cancel_button)
+    except TimeoutException:
+        # 没有找到确认弹窗，这可能是正常的，比如所有题目都答对并直接提交成功
+        pass
+    except Exception:
+        # 处理弹窗时发生其他异常
+        pass
 
     return wd
