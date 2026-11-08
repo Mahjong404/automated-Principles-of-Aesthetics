@@ -16,7 +16,7 @@ from chaoxing_solution_of_font_confusion.glyfSearch import translate
 
 def _extract_ttf_base64(wd: WebDriver) -> str | None:
     html = wd.execute_script("return document.documentElement.outerHTML")
-    m = re.search(r"font-ttf;charset=utf-8;base64,([^')]+)", html)
+    m = re.search(r"font-ttf;charset=utf-8;base64,([^\')]+)", html)
     return m.group(1) if m else None
 
 
@@ -166,6 +166,14 @@ def answer(wd: WebDriver) -> WebDriver:
         pass
     except Exception:
         # 处理弹窗时发生其他异常
+        pass
+
+    # 尝试点击“下一节”
+    try:
+        next_btn = WebDriverWait(wd, 5).until(EC.element_to_be_clickable((By.ID, "prevNextFocusNext")))
+        wd.execute_script("arguments[0].click();", next_btn)
+    except TimeoutException:
+        # 找不到“下一节”按钮，可能已经是最后一节，属正常情况
         pass
 
     return wd

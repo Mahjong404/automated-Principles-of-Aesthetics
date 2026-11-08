@@ -10,9 +10,10 @@ def sign_in(wd : WebDriver) -> WebDriver:
     sign = wd
 
     #加载账号密码及网址
-    with open("data/account.json", "r", encoding="utf-8") as f:
+    with open("real_data/account.json", "r", encoding="utf-8") as f:
         account = json.load(f)
 
+    #进入空网页，拦截mouseout事件侦听器的创建
     sign.get("about:blank")
     sign.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": """

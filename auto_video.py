@@ -3,6 +3,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.edge.service import Service
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.edge.webdriver import WebDriver
+from selenium.common.exceptions import NoSuchElementException
 
 def video(wd : WebDriver) -> WebDriver:
     watch = wd
@@ -22,7 +23,10 @@ def video(wd : WebDriver) -> WebDriver:
 
     #点击“下一节”按钮，跳转到习题部分
     watch.switch_to.default_content()
-    watch.find_element(By.ID, "prevNextFocusNext").click()
+    try:
+        watch.find_element(By.ID, "prevNextFocusNext").click()
+    except NoSuchElementException:
+        raise Exception("没有找到下一节按钮")
 
     #重置等待时间
     watch.implicitly_wait(10)
