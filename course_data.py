@@ -106,7 +106,19 @@ class QuestionBank:
                     raise ValueError
                 if not isinstance(row["answer"], str) or not isinstance(row["options"], list):
                     raise ValueError
-                self.questions.setdefault(stem, []).append(row)
+                aliases = row.get("aliases", [])
+                if not isinstance(aliases, list) or any(not isinstance(alias, str) for alias in aliases):
+                    raise ValueError
+                option_aliases = row.get("option_aliases", {})
+                if not isinstance(option_aliases, dict) or any(
+                    not isinstance(target, str) or not option_key(alias) or not option_key(target)
+                    for alias, target in option_aliases.items()
+                ):
+                    raise ValueError
+                for key in dict.fromkeys([stem, *(question_key(alias) for alias in aliases)]):
+                    if not key:
+                        raise ValueError
+                    self.questions.setdefault(key, []).append(row)
             self.count = len(entries)
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise CourseError("题库缺失或格式错误") from error
@@ -177,6 +189,9 @@ class QuestionBank:
                 return None
             expected = [JUDGMENTS.get(compact(row["answer"]).lower())]
         else:
+            aliases = {option_key(alias): option_key(target)
+                       for alias, target in row.get("option_aliases", {}).items()}
+            options = [aliases.get(option, option) for option in options]
             letters = re.findall(r"[A-Z]", unicodedata.normalize("NFKC", row["answer"]).upper())
             by_letter = {}
             for text in row["options"]:

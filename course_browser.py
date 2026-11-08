@@ -58,7 +58,7 @@ CATALOG_DATA = r"""
 """
 
 QUIZ_DATA = r"""
-([blocks, choices]) => ({
+([blocks, choices, review]) => ({
     font: [...document.querySelectorAll('style')].map(el => el.textContent)
         .filter(css => /@font-face/.test(css) && /base64,/.test(css)).join('\n'),
     questions: [...document.querySelectorAll(blocks)].filter(block => block.getClientRects().length).map(block => {
@@ -74,12 +74,15 @@ QUIZ_DATA = r"""
                 || block.id.match(/\d+$/)?.[0] || '',
             grade: block.querySelector('.CorrectOrNot .marking_dui') ? 'correct'
                 : block.querySelector('.CorrectOrNot .marking_cuo') ? 'wrong' : '',
+            submitted: review ? block.querySelector('.myAnswer .answerCon')?.innerText.trim() : undefined,
             options: [...block.querySelectorAll(choices)].map(li => {
-                const option = li.querySelector('a.fl.after, .font-cxsecret, .option-text') || li;
+                const option = li.querySelector('a.fl.after, .font-cxsecret, .option-text')
+                    || (review && li.querySelector('a.fl')) || li;
                 const aria = li.getAttribute('aria-checked') ?? li.querySelector('[aria-checked]')?.getAttribute('aria-checked');
                 const input = li.querySelector('input[type=radio], input[type=checkbox]');
                 const marker = li.querySelector('.num_option, .num_option_dx');
-                return {text: option.innerText.trim(), checked: aria === 'true' ? true
+                const label = review ? li.querySelector('i.fl')?.innerText.trim().match(/^([A-Z])[、.．:：)]$/)?.[1] : undefined;
+                return {text: option.innerText.trim(), label, checked: aria === 'true' ? true
                     : aria === 'false' ? false : input ? input.checked
                     : marker ? marker.matches('.check_answer, .check_answer_dx') : null};
             })
@@ -505,7 +508,7 @@ class CourseBrowser:
 
     def quiz_data(self, state):
         blocks, options = self.quiz_selectors(state)
-        return state.frame.evaluate(QUIZ_DATA, [blocks.removesuffix(":visible"), options])
+        return state.frame.evaluate(QUIZ_DATA, [blocks.removesuffix(":visible"), options, state.kind == "quiz_done"])
 
     def apply_choices(self, state, plan, questions):
         block_selector, option_selector = self.quiz_selectors(state)

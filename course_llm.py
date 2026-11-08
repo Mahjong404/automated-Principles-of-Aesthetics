@@ -2,6 +2,7 @@ import json
 import re
 import string
 import time
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -105,8 +106,18 @@ class CourseLLM:
             if error.code == 502 and upstream_forbidden(error):
                 raise CourseError("LLM 网关拒绝上游访问（HTTP 502），请核对当前供应商凭据") from None
             raise CourseError(f"LLM 请求失败，HTTP {error.code}") from None
-        except (OSError, URLError, ValueError, KeyError, IndexError, TypeError):
-            raise CourseError("LLM 请求失败或返回结构无效") from None
+        except URLError as error:
+            if isinstance(error.reason, TimeoutError):
+                raise CourseError("LLM 请求超时") from None
+            raise CourseError("LLM 无法连接模型服务") from None
+        except TimeoutError:
+            raise CourseError("LLM 等待模型响应超时") from None
+        except (OSError, HTTPException):
+            raise CourseError("LLM 连接或响应读取中断") from None
+        except (json.JSONDecodeError, UnicodeError):
+            raise CourseError("LLM 响应包含无效的 JSON 数据") from None
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+            raise CourseError("LLM 响应缺少预期的接口字段或字段类型不匹配") from None
         return parse_answers(reply, questions)
 
 

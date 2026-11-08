@@ -1,4 +1,5 @@
 import argparse
+import re
 import sqlite3
 import sys
 import time
@@ -15,7 +16,7 @@ try:
     from course_browser import (
         CourseBrowser, SubmissionCancelled, course_choices, exam_page, open_course_choice, space_page,
     )
-    from course_data import CourseError, QuestionBank, font_decoder, question_key
+    from course_data import CourseError, JUDGMENTS, QuestionBank, compact, font_decoder, option_key, question_key
     from course_journal import (
         begin_submission, find_attempt, pending_attempt, release_attempt, reserve_attempt, resolve_attempt,
     )
@@ -64,31 +65,58 @@ def decoded_questions(browser, state, font_dir):
     return data["questions"]
 
 
+def reviewed_choices(row):
+    options = row["options"]
+    if row.get("submitted") is None:
+        if any(option["checked"] is None for option in options):
+            return None
+        return sorted(option_key(option["text"]) for option in options if option["checked"])
+    answer = compact(row["submitted"]).upper()
+    if row["type"] == "判断题" and answer.lower() in JUDGMENTS:
+        result = JUDGMENTS[answer.lower()]
+        matches = [option_key(option["text"]) for option in options
+                   if JUDGMENTS.get(option_key(option["text"]).lower()) == result]
+        return matches if len(matches) == 1 else None
+    letters = re.sub(r"[,、]", "", answer)
+    labels = {option.get("label"): option_key(option["text"]) for option in options}
+    if (not re.fullmatch(r"[A-Z]+", letters) or len(set(letters)) != len(letters)
+            or None in labels or len(labels) != len(options) or not set(letters) <= labels.keys()):
+        return None
+    return sorted(labels[letter] for letter in letters)
+
+
 def record_feedback(browser, review, bank, font_dir, journal, scope, questions, suggestions, recovered=False):
     deadline = time.monotonic() + GRADE_TIMEOUT
     while True:
         rows = decoded_questions(browser, review, font_dir)
         grades = {}
+        verified_questions = list(questions)
         for index, choices in suggestions.items():
             question = questions[index - 1]
-            candidates = [row for row in rows if question_key(row["stem"]) == question_key(question["stem"])
-                          and (not row["type"] or row["type"] == question["type"])
-                          and (not row["id"] or not question["id"] or row["id"] == question["id"])]
+            candidates = [row for row in rows if question["id"] and row["id"] == question["id"]]
+            if not candidates:
+                candidates = [row for row in rows if (not question["id"] or not row["id"])
+                              and question_key(row["stem"]) == question_key(question["stem"])]
             grades[index] = ""
             if len(candidates) != 1:
                 continue
             row = candidates[0]
+            options = [option_key(option["text"]) for option in question["options"]]
+            if (row["type"] and row["type"] != question["type"]
+                    or not all(options) or len(set(options)) != len(options)
+                    or sorted(options) != sorted(option_key(option["text"]) for option in row["options"])):
+                continue
             if recovered:
-                expected = sorted(question_key(question["options"][i]["text"]) for i in choices)
-                checked = sorted(question_key(option["text"]) for option in row["options"] if option["checked"])
-                if any(option["checked"] is None for option in row["options"]) or checked != expected:
+                if reviewed_choices(row) != sorted(options[i] for i in choices):
                     continue
             grades[index] = row["grade"]
+            if row["stem"]:
+                verified_questions[index - 1] = {**question, "stem": row["stem"]}
         if all(grades.values()) or time.monotonic() >= deadline:
             break
         browser.page.wait_for_timeout(250)
     correct = {index: choices for index, choices in suggestions.items() if grades[index] == "correct"}
-    bank.record_verified(journal, scope, questions, correct)
+    bank.record_verified(journal, scope, verified_questions, correct)
     if correct:
         print(f"已写入题库 {len(correct)} 道经平台判对的答案")
     wrong = [str(index) for index, grade in grades.items() if grade == "wrong"]

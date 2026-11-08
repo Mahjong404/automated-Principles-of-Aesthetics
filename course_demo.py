@@ -12,11 +12,11 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-from course_browser import CourseBrowser
+from course_browser import CourseBrowser, State
 from course_data import CourseError, QuestionBank
 from course_journal import begin_submission, find_attempt, reserve_attempt
 from course_report import RunReport
-from main import DEFAULT_QUESTIONS, FONT_DIR, ReviewRequired, decoded_questions, operate, run_course
+from main import DEFAULT_QUESTIONS, FONT_DIR, ReviewRequired, decoded_questions, operate, record_feedback, run_course
 
 
 ORIGIN = "https://mooc1.chaoxing.com"
@@ -301,7 +301,59 @@ class DemoModel(BaseHTTPRequestHandler):
         pass
 
 
+def check_reviewed_answer(page, bank, font_dir, journal):
+    stem = ("亚里士多德所说的()就是指悲剧英雄的独立自主保持自身人格尊严和精神自由的品质"
+            "给观众以巨大的震撼,使得观众的精神境界得到升华。")
+    options = ["觉解", "净化", "意蕴", "命运"]
+    question = {
+        "stem": stem.replace("震撼", "震美"), "type": "单选题", "id": "3003",
+        "options": [{"text": text, "checked": False} for text in options],
+    }
+    items = "".join(f'<li><i class="fl">{letter}、</i><a class="fl">{text}</a></li>'
+                    for letter, text in zip("ABCD", options))
+    page.set_content(
+        f'<div id="question3003" class="TiMu"><div class="Zy_TItle">【单选题】{stem}</div>'
+        f'<ul class="Zy_ulTop">{items}</ul><div class="myAnswer"><div class="answerCon">B</div></div>'
+        '<div class="CorrectOrNot"><span class="marking_dui"></span></div></div>'
+    )
+    browser = CourseBrowser(page)
+    review = State("quiz_done", [], page)
+    with patch("main.GRADE_TIMEOUT", 0):
+        assert record_feedback(browser, review, bank, font_dir, journal, "demo", [question], {1: [1]}) is review
+        assert record_feedback(browser, review, bank, font_dir, journal, "demo", [question],
+                               {1: [1]}, recovered=True) is review
+        mismatch = record_feedback(browser, review, bank, font_dir, journal, "demo", [question],
+                                   {1: [0]}, recovered=True)
+        assert isinstance(mismatch, ReviewRequired) and mismatch.pending
+        other_question = {**question, "id": "3004", "stem": stem}
+        mismatch = record_feedback(browser, review, bank, font_dir, journal, "demo", [other_question], {1: [1]})
+        assert isinstance(mismatch, ReviewRequired) and mismatch.pending
+    verified = QuestionBank(None)
+    verified.load_verified(journal, "demo")
+    assert verified.match({**question, "stem": stem}, {}) == (1,)
+    fresh_bank = QuestionBank(DEFAULT_QUESTIONS)
+    assert fresh_bank.match(question, {}) == (1,)
+    assert fresh_bank.match({**question, "stem": question["stem"].replace("巨大的", "微小的")}, {}) is None
+    print("离线场景通过 review_stem_variant")
+
+
+def check_option_aliases():
+    bank = QuestionBank(DEFAULT_QUESTIONS)
+    question = {"stem": "【多选题】\n《审美教育书简》提出人的自然要求包括()", "type": "多选题"}
+    options = ["感性冲动", "理性内容", "理性冲动", "感性形式"]
+
+    def match(texts):
+        return bank.match({**question, "options": [{"text": text} for text in texts]}, {})
+
+    assert match(options) == (0, 2)
+    assert match(list(reversed(options))) == (3, 1)
+    assert match(["感性冲动", "内容", "理性冲动", "形式"]) == (0, 2)
+    assert match(["感性冲动", "未知选项", "理性冲动", "感性形式"]) is None
+    print("离线场景通过 option_aliases")
+
+
 def demo(font_dir):
+    check_option_aliases()
     scenarios = {
         "normal": ("quiz_done", 1, 1, None),
         "completed": ("quiz_done", 0, 1, None),
@@ -336,6 +388,11 @@ def demo(font_dir):
             with TemporaryDirectory() as temp, sync_playwright() as playwright:
                 edge = playwright.chromium.launch(channel="msedge", headless=True)
                 try:
+                    page = edge.new_page()
+                    try:
+                        check_reviewed_answer(page, QuestionBank(DEFAULT_QUESTIONS), font_dir, Path(temp) / "review.sqlite3")
+                    finally:
+                        page.close()
                     for scenario, expected in scenarios.items():
                         context = edge.new_context(service_workers="block")
                         try:
@@ -348,7 +405,7 @@ def demo(font_dir):
         finally:
             model.shutdown()
             server.join()
-    print(f"离线验证通过 {len(scenarios)} 个场景")
+    print(f"离线验证通过 {len(scenarios) + 2} 个场景")
 
 
 def run_demo_case(context, scenario, state, plays, submissions, expected_error, bank, font_dir, directory, model):
