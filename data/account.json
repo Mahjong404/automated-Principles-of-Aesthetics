@@ -1,5 +1,11 @@
 {
   "phone": "",
   "password": "",
-  "course": ""
+  "llm": {
+    "base_url": "",
+    "api_key": "",
+    "model": "",
+    "auto_commit": false,
+    "reasoning_effort": null
+  }
 }
