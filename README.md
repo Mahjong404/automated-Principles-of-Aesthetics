@@ -1,79 +1,81 @@
 # 《美学原理》课程自动化
 
-复用 Edge 或 Chrome 中的学习通会话，或在独立窗口登录。按章节处理视频和测验，题库缺项可选用兼容 Chat Completions 的模型接口。
+一个基于 Python 和 Playwright 的超星学习通课程助手，内置《美学原理》题库。它可以复用 Edge 或 Chrome 的登录会话，从课程目录或已打开的章节接着运行。
 
-## 安装和启动
+## 功能
 
-需要 Python 3.10+ 及 Edge 或 Chrome。
+- 按章节处理视频和测验。视频支持静音、最高可用倍速、后台播放，以及同一页内多个视频的顺序播放。
+- 优先用题库匹配测验题目。题库缺项时可配置大模型补答，考试答题页只暂存，留待人工核对。
+- 开始前预览课程进度和待办事项。结束或停止时输出运行回执，Windows 下同时发送系统通知。
+- 提交中断后，重新运行会先核对平台结果。结果不明时会停在当前章节等待核对，避免重复提交。
+
+## 快速开始
+
+需要 Python 3.10 或更新版本，以及 Microsoft Edge 或 Google Chrome。以下命令使用 PowerShell。
 
 ```powershell
+git clone https://github.com/Mahjong404/automated-Principles-of-Aesthetics.git
+cd automated-Principles-of-Aesthetics
 python -m pip install -r requirements.txt
 python main.py --run
 ```
 
-| 启动命令 | 登录流程 |
+若从学习通个人空间进入，在终端输入课程编号。若程序复用了已打开的课程页面，会从当前页面开始。需要登录时，可在终端输入学习通账号和密码，输入的密码不会回显。
+
+## 启动方式
+
+| 命令 | 用途 |
 | --- | --- |
-| `python main.py --run` | 检查 Edge 或 Chrome 的本机 CDP，优先复用课程、考试或个人空间标签。没有合适标签时打开学习通个人空间检查登录态。 |
-| `python main.py --standalone --run` | 新开独立浏览器窗口和会话，从个人空间开始检查登录态。 |
-| `python main.py --login --run` | 先提示输入账号和密码，再在独立窗口登录。 |
+| `python main.py --run` | 优先复用已有浏览器会话。没有可用连接时启动独立会话。 |
+| `python main.py --standalone --run` | 直接启动独立浏览器会话。 |
+| `python main.py --login --run` | 在终端输入账号和密码，并在独立浏览器会话登录。 |
 
-默认和独立模式遇到未登录时，先尝试 `real_data/account.json` 的 `phone` 和 `password`。凭据缺失或登录失败时在终端提示输入，密码不回显。`--login` 使用本次输入的凭据。配置文件无需填写课程 URL。
+要复用日常浏览器，在 Edge 的 `edge://inspect/#remote-debugging` 或 Chrome 的 `chrome://inspect/#remote-debugging` 中启用远程调试。浏览器提示时允许连接。程序也会检查本机的 `9222` 和 `9223` 调试端口。
 
-要复用日常浏览器，在 `edge://inspect/#remote-debugging` 或 `chrome://inspect/#remote-debugging` 启用远程调试，并在浏览器提示时允许连接。程序检查浏览器的本地调试端口文件以及 9222、9223。无法连接时会新开独立窗口。
+## 可选配置
 
-从个人空间启动时，在终端输入课程编号。已打开课程时从当前页面继续。视频支持静音、选择最高可用倍速、后台播放和按顺序处理同页多个播放器。运行完成或故障时通过 Windows 系统通知提示。
+首次创建本地配置时，将 [配置模板](data/account.json) 复制到 `real_data/account.json`。
 
-## 课程体检、回执与提交恢复
-
-- 开跑前显示页面能读取的任务点进度、下一项和目录中的后续锁定项。当前已显示题目时，也会预览题库匹配数。体检只读页面和本地题库。
-- 结束时在终端列出本次确认完成的操作、停止的位置和下次该从哪里继续。发生故障时，可复制最后一行「故障诊断摘要」，其中只列章节、阶段和原因。
-- 提交中断后，重新运行会优先核对当前课程和账号的待确认记录。平台显示已完成时，继续读取结果；结果不明确时，停在原章等待人工确认，避免重复提交。恢复模型判分时，只有平台回顾页能核对到对应选择和正确结果才会写入题库。旧版防重记录只能在打开对应章节时核对平台是否已提交。
-
-## 可选 LLM 配置
-
-把 `data/account.json` 复制到 `real_data/account.json`。需要使用模型时，添加或填写 `llm` 对象。默认的 `real_data/` 目录由 Git 忽略。
-
-```json
-{
-  "phone": "",
-  "password": "",
-  "llm": {
-    "base_url": "",
-    "api_key": "",
-    "model": "",
-    "auto_commit": false,
-    "reasoning_effort": null
-  }
-}
+```powershell
+New-Item -ItemType Directory -Force real_data
+Copy-Item data/account.json real_data/account.json
 ```
 
-按服务商文档填写 API 地址，保留其路径前缀。脚本不会自动补 `/v1`。
+可填写 `phone` 和 `password`，供默认模式和独立模式在需要登录时尝试使用。留空时可按终端提示输入。Git 会忽略 `real_data/`，其中也保存提交恢复记录和平台已确认正确的模型答案。
 
-| 服务商提供的接口 | `base_url` 填法 |
+### 大模型补答
+
+在本地配置的 `llm` 对象中填写以下字段，即可为题库未匹配的题目启用模型补答。
+
+| 字段 | 用途 |
 | --- | --- |
-| Chat Completions | 填服务商提供的基础地址，脚本追加 `/chat/completions`。也可直接填以 `/chat/completions` 结尾的完整地址。 |
-| Responses | 填以 `/responses` 结尾的完整地址，脚本使用流式 Responses。CC Switch 中的 `wire_api = "responses"` 是单独的协议设置，复制其基础地址时还需补上 `/responses`。 |
+| `base_url` | Chat Completions 可填服务商的基础地址或完整的 `/chat/completions` 端点。流式 Responses 填以 `/responses` 结尾的完整端点。保留服务商要求的路径前缀，例如 `/v1`。 |
+| `api_key`、`model` | 服务商提供的 API 密钥和模型名称。 |
+| `auto_commit` | 默认 `false`。有模型补答的章节测验会暂存并等待核对。设为 `true` 时，程序提交该测验并核对平台判分。已打开的考试答题页仍只暂存。 |
+| `reasoning_effort` | 可选。仅在服务商和模型支持时设置，例如 `"high"`。留为 `null` 时采用服务商默认设置。 |
 
-例如，[DeepSeek 的 Chat Completions 文档](https://api-docs.deepseek.com/) 给出的基础地址是 `https://api.deepseek.com`，请求发往 `https://api.deepseek.com/chat/completions`。若其他服务商的文档写的是 `https://api.example.com/v1`，则保留其 `/v1`。
+补答请求会将课程名、章节名、缺失题目和选项发送给配置的服务商。程序会校验模型返回的题号与选项。章节测验提交后，只有平台确认正确的模型答案才会保存到本地题库，供同一课程后续匹配。
 
-只有服务商和模型支持时，才将 `reasoning_effort` 设置为 `"high"` 等支持的值。留为 `null` 或省略时，脚本使用服务商默认设置。
+### 混淆字体
 
-- **题库优先**。题库无法匹配时才向配置的服务商发送课程名、章节名、缺失题目和选项。模型必须按指定格式返回单个 JSON 代码块。题号、选项范围和数量全部通过校验后才会填写。
-- **章节测验**。使用了 LLM 且 `auto_commit` 为 `true` 时提交，根据学习通逐题判分核对。判对的模型答案按课程写入 `real_data/submissions.sqlite3` 的 `verified_answers` 表，之后可供同一课程匹配。判错或无法确认判分时停止并提示核对。`auto_commit` 为 `false` 时暂存并停在当前页。
-- **考试**。在已打开且可识别的考试答题页，核对整页所有题后只暂存，随后停在当前页等待本人检查。无法识别某道题、选项状态或唯一暂存按钮时，会停止并提示人工处理。该流程使用本地模拟考试验证。
-
-## 题库和离线验证
-
-内置 `data/questions.json` 对应《美学原理》。遇到内嵌混淆字体的测验时，请在本项目根目录运行以下命令，从上游获取字体映射表。普通测验无需这一步。
+如果测验页面使用内嵌混淆字体，在本项目根目录运行以下命令获取字体映射表。
 
 ```powershell
 git clone https://github.com/TellMeYourWish/chaoxing_solution_of_font_confusion.git
 ```
 
-脚本从 `chaoxing_solution_of_font_confusion/` 读取 `HanSansCN_glyfHashedTables.pkl` 和 `HanSansCN_CmapTables.pkl`。
+程序从该目录读取 `HanSansCN_glyfHashedTables.pkl` 和 `HanSansCN_CmapTables.pkl`。
+
+## 反馈与贡献
+
+欢迎在 GitHub 报告问题或提交 Pull Request。报告运行问题时，可附上章节、复现步骤和终端的「故障诊断摘要」。 [提交 Issue](https://github.com/Mahjong404/automated-Principles-of-Aesthetics/issues) · [查看 Pull Requests](https://github.com/Mahjong404/automated-Principles-of-Aesthetics/pulls)
+
+修改代码后，可运行离线测试。测试使用模拟课程页面和本地模型接口，覆盖题库匹配、答题、判分、暂存和提交恢复。
 
 ```powershell
 python course_demo.py
 ```
 
-离线演示使用模拟课程页面和本机模型接口验证题库、答题、逐题判分写回、考试暂存、运行回执和提交恢复。
+## 鸣谢
+
+感谢 **TellMeYourWish** 的超星学习通混淆字体解码项目提供正确的字体映射。 [chaoxing_solution_of_font_confusion](https://github.com/TellMeYourWish/chaoxing_solution_of_font_confusion)
